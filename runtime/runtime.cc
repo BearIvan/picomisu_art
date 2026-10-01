@@ -88,6 +88,7 @@
 #include "hidden_api.h"
 #include "image-inl.h"
 #include "instrumentation.h"
+#include "iprocess_time.h"
 #include "intern_table-inl.h"
 #include "interpreter/interpreter.h"
 #include "jit/jit.h"
@@ -365,6 +366,9 @@ Runtime::~Runtime() {
         << static_cast<uint64_t>(post_gc_weighted_allocated_bytes)
         << " (" <<  PrettySize(post_gc_weighted_allocated_bytes)  << ")"
         << "\n";
+    // PICO OS 5.13.7 frees the process time source here, inside the GC performance dump block.
+    delete process_time_;
+    process_time_ = nullptr;
   }
 
   // Wait for the workers of thread pools to be created since there can't be any

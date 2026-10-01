@@ -87,6 +87,7 @@ class CompilerCallbacks;
 class DexFile;
 enum class InstructionSet;
 class InternTable;
+class IProcessTime;
 class IsMarkedVisitor;
 class JavaVMExt;
 class LinearAlloc;
@@ -865,6 +866,15 @@ class Runtime {
     load_app_image_startup_cache_ = enabled;
   }
 
+  // PICO OS 5.13.7: /dev/binder_get_time counters, created after fork for non-zygote processes.
+  IProcessTime* GetProcessTime() const {
+    return process_time_;
+  }
+
+  void SetProcessTime(IProcessTime* process_time) {
+    process_time_ = process_time;
+  }
+
   // Notify the runtime that application startup is considered completed. Only has effect for the
   // first call.
   void NotifyStartupCompleted();
@@ -1213,6 +1223,9 @@ class Runtime {
 
   gc::space::ImageSpaceLoadingOrder image_space_loading_order_ =
       gc::space::ImageSpaceLoadingOrder::kSystemFirst;
+
+  // PICO OS 5.13.7 process time source (see VMDebug.getSysMillisecond/getSysUptimeMillis).
+  IProcessTime* process_time_ = nullptr;
 
   // Note: See comments on GetFaultMessage.
   friend std::string GetFaultMessageForAbortLogging();

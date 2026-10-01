@@ -36,6 +36,7 @@
 #include "gc/space/zygote_space.h"
 #include "handle_scope-inl.h"
 #include "hprof/hprof.h"
+#include "iprocess_time.h"
 #include "jni/java_vm_ext.h"
 #include "jni/jni_internal.h"
 #include "mirror/array-alloc-inl.h"
@@ -623,6 +624,23 @@ static void VMDebug_setAllocTrackerStackDepth(JNIEnv* env, jclass, jint stack_de
   }
 }
 
+// PICO OS 5.13.7: kernel time counters of this process (-1 when unavailable).
+static jlong VMDebug_getSysMillisecond(JNIEnv*, jclass) {
+  IProcessTime* process_time = Runtime::Current()->GetProcessTime();
+  if (process_time == nullptr) {
+    return -1;
+  }
+  return process_time->getSysMillisecond();
+}
+
+static jlong VMDebug_getSysUptimeMillis(JNIEnv*, jclass) {
+  IProcessTime* process_time = Runtime::Current()->GetProcessTime();
+  if (process_time == nullptr) {
+    return -1;
+  }
+  return process_time->getSysUptimeMillis();
+}
+
 static JNINativeMethod gMethods[] = {
   NATIVE_METHOD(VMDebug, countInstancesOfClass, "(Ljava/lang/Class;Z)J"),
   NATIVE_METHOD(VMDebug, countInstancesOfClasses, "([Ljava/lang/Class;Z)[J"),
@@ -660,6 +678,8 @@ static JNINativeMethod gMethods[] = {
   NATIVE_METHOD(VMDebug, nativeAttachAgent, "(Ljava/lang/String;Ljava/lang/ClassLoader;)V"),
   NATIVE_METHOD(VMDebug, allowHiddenApiReflectionFrom, "(Ljava/lang/Class;)V"),
   NATIVE_METHOD(VMDebug, setAllocTrackerStackDepth, "(I)V"),
+  FAST_NATIVE_METHOD(VMDebug, getSysMillisecond, "()J"),
+  FAST_NATIVE_METHOD(VMDebug, getSysUptimeMillis, "()J"),
 };
 
 void register_dalvik_system_VMDebug(JNIEnv* env) {

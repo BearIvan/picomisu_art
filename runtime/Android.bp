@@ -104,6 +104,7 @@ libart_cc_defaults {
         "interpreter/lock_count_data.cc",
         "interpreter/shadow_frame.cc",
         "interpreter/unstarted_runtime.cc",
+        "iprocess_time.cc",
         "java_frame_root_info.cc",
         "jdwp/jdwp_event.cc",
         "jdwp/jdwp_expand_buf.cc",

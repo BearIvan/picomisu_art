@@ -28,6 +28,7 @@
 #include "base/runtime_debug.h"
 #include "debugger.h"
 #include "hidden_api.h"
+#include "iprocess_time.h"
 #include "jit/jit.h"
 #include "jit/jit_code_cache.h"
 #include "jni/java_vm_ext.h"
@@ -288,6 +289,11 @@ static void ZygoteHooks_nativePostForkChild(JNIEnv* env,
   hiddenapi::EnforcementPolicy api_enforcement_policy = hiddenapi::EnforcementPolicy::kDisabled;
 
   Runtime* runtime = Runtime::Current();
+
+  // PICO OS 5.13.7: map the /dev/binder_get_time counters in every non-zygote child.
+  if (!is_zygote) {
+    runtime->SetProcessTime(new IProcessTime());
+  }
 
   if ((runtime_flags & DISABLE_VERIFIER) != 0) {
     runtime->DisableVerifier();
