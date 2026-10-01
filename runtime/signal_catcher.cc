@@ -37,8 +37,10 @@
 #include "class_linker.h"
 #include "gc/heap.h"
 #include "jit/profile_saver.h"
+#include "jni/java_vm_ext.h"
 #include "palette/palette.h"
 #include "runtime.h"
+#include "runtime_callbacks.h"
 #include "scoped_thread_state_change-inl.h"
 #include "signal_set.h"
 #include "thread.h"
@@ -138,7 +140,9 @@ void SignalCatcher::HandleSigQuit() {
     }
   }
   os << "----- end " << getpid() << " -----\n";
-  Output(os.str());
+  std::string output = anr_info_ + os.str();
+  anr_info_ = "";
+  Output(output);
 }
 
 void SignalCatcher::HandleSigUsr1() {
@@ -167,6 +171,34 @@ int SignalCatcher::WaitForSignal(Thread* self, SignalSet& signals) {
   return signal_number;
 }
 
+class ANRSigQuitCallback::Callback : public RuntimeSigQuitCallback {
+ public:
+  void SigQuit() override REQUIRES_SHARED(Locks::mutator_lock_) {
+    JNIEnv* env = nullptr;
+    Runtime::Current()->GetJavaVM()->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_4);
+    jclass anr_logger = env->FindClass("android/app/AnrLogger");
+    if (anr_logger == nullptr) {
+      return;
+    }
+    jmethodID dump = env->GetStaticMethodID(anr_logger, "dump", "()Ljava/lang/String;");
+    if (dump == nullptr) {
+      return;
+    }
+    jstring result = reinterpret_cast<jstring>(env->CallStaticObjectMethod(anr_logger, dump));
+    SignalCatcher* signal_catcher = Runtime::Current()->GetSignalCatcher();
+    const char* chars = env->GetStringUTFChars(result, nullptr);
+    if (chars == nullptr) {
+      return;
+    }
+    std::string info(chars);
+    env->ReleaseStringUTFChars(result, chars);
+    env->DeleteLocalRef(result);
+    signal_catcher->AddAnrInfo(info);
+  }
+};
+
+ANRSigQuitCallback::Callback* ANRSigQuitCallback::cb_ = nullptr;
+
 void* SignalCatcher::Run(void* arg) {
   SignalCatcher* signal_catcher = reinterpret_cast<SignalCatcher*>(arg);
   CHECK(signal_catcher != nullptr);
@@ -181,6 +213,15 @@ void* SignalCatcher::Run(void* arg) {
     MutexLock mu(self, signal_catcher->lock_);
     signal_catcher->thread_ = self;
     signal_catcher->cond_.Broadcast(self);
+  }
+
+  // PICO OS 5.13.7: register the AnrLogger SIGQUIT callback.
+  if (Locks::mutator_lock_->ExclusiveLockWithTimeout(Thread::Current(), 1000, 0)) {
+    if (ANRSigQuitCallback::cb_ == nullptr) {
+      ANRSigQuitCallback::cb_ = new ANRSigQuitCallback::Callback();
+    }
+    Runtime::Current()->GetRuntimeCallbacks()->AddRuntimeSigQuitCallback(ANRSigQuitCallback::cb_);
+    Locks::mutator_lock_->ExclusiveUnlock(Thread::Current());
   }
 
   // Set up mask with signals we want to handle.

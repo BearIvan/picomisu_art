@@ -17,6 +17,8 @@
 #ifndef ART_RUNTIME_SIGNAL_CATCHER_H_
 #define ART_RUNTIME_SIGNAL_CATCHER_H_
 
+#include <string>
+
 #include "android-base/unique_fd.h"
 #include "base/mutex.h"
 
@@ -39,6 +41,11 @@ class SignalCatcher {
   void HandleSigQuit() REQUIRES(!Locks::mutator_lock_, !Locks::thread_list_lock_,
                                 !Locks::thread_suspend_count_lock_);
 
+  // PICO OS 5.13.7: text prepended to the next SIGQUIT dump (see ANRSigQuitCallback).
+  void AddAnrInfo(std::string info) {
+    anr_info_.append(info);
+  }
+
 
  private:
   // NO_THREAD_SAFETY_ANALYSIS for static function calling into member function with excludes lock.
@@ -55,6 +62,15 @@ class SignalCatcher {
   bool halt_ GUARDED_BY(lock_);
   pthread_t pthread_ GUARDED_BY(lock_);
   Thread* thread_ GUARDED_BY(lock_);
+  std::string anr_info_;
+};
+
+// PICO OS 5.13.7: SIGQUIT runtime callback, registered by the signal catcher thread, that adds the
+// output of android.app.AnrLogger.dump() (sysmonitor-framework) to the stack trace dump.
+class ANRSigQuitCallback {
+ public:
+  class Callback;
+  static Callback* cb_;
 };
 
 }  // namespace art

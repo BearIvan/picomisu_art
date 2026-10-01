@@ -875,6 +875,11 @@ class Runtime {
     process_time_ = process_time;
   }
 
+  // PICO OS 5.13.7 (ANRSigQuitCallback).
+  SignalCatcher* GetSignalCatcher() const {
+    return signal_catcher_;
+  }
+
   // Notify the runtime that application startup is considered completed. Only has effect for the
   // first call.
   void NotifyStartupCompleted();
