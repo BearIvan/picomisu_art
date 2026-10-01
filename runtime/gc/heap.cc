@@ -74,6 +74,7 @@
 #include "handle_scope-inl.h"
 #include "heap-inl.h"
 #include "heap-visit-objects-inl.h"
+#include "hprof/hprof_opt.h"
 #include "image.h"
 #include "intern_table.h"
 #include "jit/jit.h"
@@ -1894,6 +1895,12 @@ mirror::Object* Heap::AllocateInternalWithGc(Thread* self,
   }
   // If the allocation hasn't succeeded by this point, throw an OOM error.
   if (ptr == nullptr) {
+    // PICO OS 5.13.7: give the cropped heap dump a chance first. While another thread is dumping,
+    // return without an exception so that the caller retries the allocation.
+    if (!self->IsHandlingStackOverflow() &&
+        hprof_opt::checkDumpHeap() == hprof_opt::kDumpHeapOngoing) {
+      return nullptr;
+    }
     ThrowOutOfMemoryError(self, alloc_size, allocator);
   }
   return ptr;

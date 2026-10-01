@@ -36,6 +36,7 @@
 #include "gc/space/zygote_space.h"
 #include "handle_scope-inl.h"
 #include "hprof/hprof.h"
+#include "hprof/hprof_opt.h"
 #include "iprocess_time.h"
 #include "jni/java_vm_ext.h"
 #include "jni/jni_internal.h"
@@ -641,6 +642,15 @@ static jlong VMDebug_getSysUptimeMillis(JNIEnv*, jclass) {
   return process_time->getSysUptimeMillis();
 }
 
+// PICO OS 5.13.7 cropped out-of-memory heap dump (see hprof/hprof_opt.h).
+static void VMDebug_checkDumpHeap(JNIEnv*, jclass) {
+  hprof_opt::checkDumpHeap();
+}
+
+static void VMDebug_setDumpFlag(JNIEnv*, jclass, jboolean flag) {
+  hprof_opt::setDumpFlag(flag);
+}
+
 static JNINativeMethod gMethods[] = {
   NATIVE_METHOD(VMDebug, countInstancesOfClass, "(Ljava/lang/Class;Z)J"),
   NATIVE_METHOD(VMDebug, countInstancesOfClasses, "([Ljava/lang/Class;Z)[J"),
@@ -680,6 +690,8 @@ static JNINativeMethod gMethods[] = {
   NATIVE_METHOD(VMDebug, setAllocTrackerStackDepth, "(I)V"),
   FAST_NATIVE_METHOD(VMDebug, getSysMillisecond, "()J"),
   FAST_NATIVE_METHOD(VMDebug, getSysUptimeMillis, "()J"),
+  NATIVE_METHOD(VMDebug, checkDumpHeap, "()V"),
+  NATIVE_METHOD(VMDebug, setDumpFlag, "(Z)V"),
 };
 
 void register_dalvik_system_VMDebug(JNIEnv* env) {
