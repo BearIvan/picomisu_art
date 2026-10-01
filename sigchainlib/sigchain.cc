@@ -158,6 +158,10 @@ class ScopedHandlingSignal {
   bool original_value_;
 };
 
+#if defined(__BIONIC__)
+static bool xr_default_handler(int signo, siginfo_t* siginfo, void* ucontext_raw);  // PICO
+#endif
+
 class SignalChain {
  public:
   SignalChain() : claimed_(false) {
@@ -189,10 +193,17 @@ class SignalChain {
 
 #if defined(__BIONIC__)
     linked_sigaction64(signo, &handler_action, &action_);
+    // PICO: keep the pre-sigchain action (normally debuggerd's) and chain xr_default_handler.
+    RegisterDefaultHandler(signo);
 #else
     linked_sigaction(signo, &handler_action, &action_);
 #endif
   }
+
+#if defined(__BIONIC__)
+  // PICO (factory PICO OS 5.13.7): defined after `chains`.
+  static void RegisterDefaultHandler(int signo);
+#endif
 
   template <typename SigactionType>
   SigactionType GetAction() {
@@ -257,19 +268,64 @@ class SignalChain {
 
   static void Handler(int signo, siginfo_t* siginfo, void*);
 
+#if defined(__BIONIC__)
+  friend bool xr_default_handler(int signo, siginfo_t* siginfo, void* ucontext_raw);
+#endif
+
  private:
   bool claimed_;
 #if defined(__BIONIC__)
   struct sigaction64 action_;
+  // PICO: the action that was installed before sigchain registered (factory PICO OS 5.13.7).
+  struct sigaction64 default_action_;
 #else
   struct sigaction action_;
 #endif
-  SigchainAction special_handlers_[2];
+  // PICO: three slots (the factory adds xr_default_handler next to the ART/native bridge ones).
+  SigchainAction special_handlers_[3];
 };
 
 // _NSIG is 1 greater than the highest valued signal, but signals start from 1.
 // Leave an empty element at index 0 for convenience.
 static SignalChain chains[_NSIG + 1];
+
+#if defined(__BIONIC__)
+// PICO: when the user handler of a signal lives in libunity.so (Unity VR apps install their own
+// crash handlers), first hand the signal to the pre-sigchain action (debuggerd) as
+// BIONIC_SIGNAL_DEBUGGER (35) so a backtrace is dumped, then let the chain continue to Unity.
+bool xr_default_handler(int signo, siginfo_t* siginfo, void* ucontext_raw) {
+  log("xr_default_handler signal: %d, signo: %d", signo, siginfo->si_signo);
+  SignalChain& chain = chains[signo];
+  if (!(chain.action_.sa_flags & SA_SIGINFO) &&
+      reinterpret_cast<uintptr_t>(chain.action_.sa_handler) < 2) {
+    return false;
+  }
+  Dl_info info;
+  if (dladdr(reinterpret_cast<void*>(chain.action_.sa_handler), &info) == 0) {
+    return false;
+  }
+  if (strstr(info.dli_fname, "libunity.so") == nullptr) {
+    return false;
+  }
+  if (chain.default_action_.sa_flags & SA_SIGINFO) {
+    chain.default_action_.sa_sigaction(35, siginfo, ucontext_raw);
+  } else if (reinterpret_cast<uintptr_t>(chain.default_action_.sa_handler) >= 2) {
+    chain.default_action_.sa_handler(signo);
+  }
+  return false;
+}
+
+void SignalChain::RegisterDefaultHandler(int signo) {
+  SignalChain& chain = chains[signo];
+  chain.default_action_ = chain.action_;
+  SigchainAction sa;
+  sigemptyset(&sa.sc_mask);
+  memcpy(&sa.sc_mask, &chain.action_.sa_mask, sizeof(sa.sc_mask));
+  sa.sc_sigaction = xr_default_handler;
+  sa.sc_flags = 0;
+  chain.AddSpecialHandler(&sa);
+}
+#endif
 
 void SignalChain::Handler(int signo, siginfo_t* siginfo, void* ucontext_raw) {
   // Try the special handlers first.
