@@ -94,7 +94,11 @@ class ThreadList {
   // thread on success else null. The thread id is used to identify the thread to avoid races with
   // the thread terminating. Note that as thread ids are recycled this may not suspend the expected
   // thread, that may be terminating. If the suspension times out then *timeout is set to true.
-  Thread* SuspendThreadByThreadId(uint32_t thread_id, SuspendReason reason, bool* timed_out)
+  // PICO OS 5.13.7: when thread_id is 0, the thread may also be found by its kernel tid.
+  Thread* SuspendThreadByThreadId(uint32_t thread_id,
+                                  SuspendReason reason,
+                                  bool* timed_out,
+                                  int tid = 0)
       REQUIRES(!Locks::mutator_lock_,
                !Locks::thread_list_lock_,
                !Locks::thread_suspend_count_lock_);

@@ -16,8 +16,14 @@
 
 #include "dalvik_system_VMStack.h"
 
-#include <type_traits>
+#include <unistd.h>
 
+#include <sstream>
+#include <string>
+#include <type_traits>
+#include <vector>
+
+#include "backtrace/BacktraceMap.h"
 #include "nativehelper/jni_macros.h"
 
 #include "art_method-inl.h"
@@ -169,6 +175,68 @@ static jobjectArray VMStack_getAnnotatedThreadStackTrace(JNIEnv* env, jclass, jo
   return GetThreadStack(soa, javaThread, fn);
 }
 
+// PICO OS 5.13.7: dumps the full stack of the thread with kernel tid "tid" (when > 0), else of the
+// thread with thin-lock id "thread_id" (when != 0), else of "javaThread".
+static jstring VMStack_getThreadStackAll(JNIEnv* env, jclass, jint tid, jint thread_id,
+                                         jobject javaThread) {
+  ScopedFastNativeObjectAccess soa(env);
+  std::ostringstream os;
+  Thread* self = soa.Self();
+  if ((javaThread != nullptr && soa.Decode<mirror::Object>(javaThread) == self->GetPeer()) ||
+      self->GetTid() == tid ||
+      self->GetThreadId() == static_cast<uint32_t>(thread_id)) {
+    self->Dump(os);
+    return env->NewStringUTF(os.str().c_str());
+  }
+  // Never allow suspending the heap task thread since it may deadlock if allocations are
+  // required for the stack trace; its dump is empty.
+  Thread* heap_task_thread =
+      Runtime::Current()->GetHeap()->GetTaskProcessor()->GetRunningThread();
+  if (heap_task_thread != nullptr &&
+      (heap_task_thread->GetTid() == tid ||
+       heap_task_thread->GetThreadId() == static_cast<uint32_t>(thread_id) ||
+       soa.Decode<mirror::Object>(javaThread) == heap_task_thread->GetPeerFromOtherThread())) {
+    return env->NewStringUTF(os.str().c_str());
+  }
+  {
+    // Suspend thread to build stack trace.
+    ScopedThreadSuspension sts(self, kNative);
+    ThreadList* thread_list = Runtime::Current()->GetThreadList();
+    bool timed_out;
+    Thread* thread;
+    if (tid > 0) {
+      thread = thread_list->SuspendThreadByThreadId(0, SuspendReason::kInternal, &timed_out, tid);
+    } else if (thread_id != 0) {
+      thread = thread_list->SuspendThreadByThreadId(thread_id, SuspendReason::kInternal, &timed_out);
+    } else if (javaThread != nullptr) {
+      thread = thread_list->SuspendThreadByPeer(javaThread,
+                                                /* request_suspension= */ true,
+                                                SuspendReason::kInternal,
+                                                &timed_out);
+    } else {
+      // The factory runtime reports a missing target like a suspension timeout.
+      thread = nullptr;
+      timed_out = true;
+    }
+    if (thread != nullptr) {
+      {
+        ScopedObjectAccess soa2(self);
+        // As on the factory: the map is created (and never freed) but not passed to Dump().
+        BacktraceMap* map = BacktraceMap::Create(getpid());
+        map->SetSuffixesToIgnore(std::vector<std::string> { "oat", "odex" });
+        thread->Dump(os);
+      }
+      // Restart suspended thread.
+      bool resumed = thread_list->Resume(thread, SuspendReason::kInternal);
+      DCHECK(resumed);
+    } else if (timed_out) {
+      LOG(ERROR) << "Trying to get thread's stack failed as the thread failed to suspend within a "
+          "generous timeout.";
+    }
+  }
+  return env->NewStringUTF(os.str().c_str());
+}
+
 static JNINativeMethod gMethods[] = {
   FAST_NATIVE_METHOD(VMStack, fillStackTraceElements, "(Ljava/lang/Thread;[Ljava/lang/StackTraceElement;)I"),
   FAST_NATIVE_METHOD(VMStack, getCallingClassLoader, "()Ljava/lang/ClassLoader;"),
@@ -176,6 +244,7 @@ static JNINativeMethod gMethods[] = {
   FAST_NATIVE_METHOD(VMStack, getStackClass2, "()Ljava/lang/Class;"),
   FAST_NATIVE_METHOD(VMStack, getThreadStackTrace, "(Ljava/lang/Thread;)[Ljava/lang/StackTraceElement;"),
   FAST_NATIVE_METHOD(VMStack, getAnnotatedThreadStackTrace, "(Ljava/lang/Thread;)[Ldalvik/system/AnnotatedStackTraceElement;"),
+  FAST_NATIVE_METHOD(VMStack, getThreadStackAll, "(IILjava/lang/Thread;)Ljava/lang/String;"),
 };
 
 void register_dalvik_system_VMStack(JNIEnv* env) {

@@ -1010,13 +1010,14 @@ static void ThreadSuspendByThreadIdWarning(LogSeverity severity,
 
 Thread* ThreadList::SuspendThreadByThreadId(uint32_t thread_id,
                                             SuspendReason reason,
-                                            bool* timed_out) {
+                                            bool* timed_out,
+                                            int tid) {
   const uint64_t start_time = NanoTime();
   useconds_t sleep_us = kThreadSuspendInitialSleepUs;
   *timed_out = false;
   Thread* suspended_thread = nullptr;
   Thread* const self = Thread::Current();
-  CHECK_NE(thread_id, kInvalidThreadId);
+  // PICO OS 5.13.7: thread_id may be 0 (kInvalidThreadId) for a lookup by kernel tid.
   VLOG(threads) << "SuspendThreadByThreadId starting";
   while (true) {
     {
@@ -1029,7 +1030,7 @@ Thread* ThreadList::SuspendThreadByThreadId(uint32_t thread_id,
       MutexLock thread_list_mu(self, *Locks::thread_list_lock_);
       Thread* thread = nullptr;
       for (const auto& it : list_) {
-        if (it->GetThreadId() == thread_id) {
+        if (it->GetThreadId() == thread_id || (thread_id == 0 && it->GetTid() == tid)) {
           thread = it;
           break;
         }
